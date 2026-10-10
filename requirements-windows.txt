@@ -1,0 +1,2 @@
+# Bản Windows dùng Chrome cài sẵn, không cần Playwright/Selenium/ChromeDriver.
+websocket-client==1.9.0

@@ -1,0 +1,21 @@
+{
+  "name": "thinh-liet-vote-cli",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "helper": "open -na 'Google Chrome' chrome-helper.html",
+    "inspect": "node vote.mjs",
+    "vote": "node vote.mjs --submit",
+    "vote:api": "node vote.mjs --submit --api",
+    "lab": "node lab/server.mjs",
+    "lab:turnstile": "node lab/server.mjs --turnstile --port 3001",
+    "lab:token-api": "node lab/token-demo.mjs",
+    "lab:load": "node lab/load.mjs",
+    "lab:vote": "node lab/vote.mjs",
+    "lab:vote:http": "node lab/vote-http.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": { "playwright-core": "1.64.0" }
+}

@@ -1,0 +1,3 @@
+# Phụ thuộc kiểm thử; bản macOS không cần cài các gói này khi chạy.
+playwright==1.63.0
+-r requirements-windows.txt

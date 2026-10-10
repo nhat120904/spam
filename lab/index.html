@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vote Lab · Bình chọn localhost</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,sans-serif;color:#202720;background:#f6f5ef;font-synthesis:none;--green:#254d37;--gold:#ffd862}
+    *{box-sizing:border-box}body{margin:0}button,select,a{font:inherit}button,a,select{touch-action:manipulation}button{cursor:pointer}
+    .shell{max-width:1120px;margin:auto;padding:28px}.nav{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #d8ded3;padding-bottom:22px;gap:14px}.brand{font-weight:850;letter-spacing:.07em}.badge{font-size:12px;border:1px solid #c5d3c4;border-radius:99px;padding:7px 12px;color:var(--green);background:#edf3e9}
+    .hero{display:grid;grid-template-columns:1.25fr 1fr;gap:42px;align-items:center;margin:48px 0}.eyebrow{text-transform:uppercase;font-size:12px;letter-spacing:.17em;color:#54715b;font-weight:700}h1{font-family:Georgia,serif;font-size:clamp(34px,5vw,57px);line-height:1.1;font-weight:400;letter-spacing:-.035em;margin:18px 0}p{line-height:1.6;color:#626c60}.stats{display:grid;grid-template-columns:1fr 1fr;gap:14px}.stat{background:#fff;border:1px solid #e0e4d9;border-radius:18px;padding:28px}.stat strong{display:block;font-size:40px;letter-spacing:-.06em;color:var(--green)}.stat span{font-size:13px;color:#677061}.primary{background:var(--gold);border:0;border-radius:10px;padding:15px 25px;font-weight:700;box-shadow:0 3px 0 #dfbb4a}.secondary{background:#fff;border:1px solid #d2dbce;border-radius:9px;padding:10px 14px;color:var(--green)}
+    .panel{background:#fff;border:1px solid #e0e4d9;border-radius:18px;padding:24px}.toolbar{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}.toolbar label{display:flex;gap:12px;align-items:center;font-size:14px}.toolbar select{border:1px solid #cbd6c7;border-radius:8px;padding:10px;background:white;max-width:100%}.note{font-size:13px;margin-bottom:0}.criteria-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:28px}.criterion{display:flex;justify-content:space-between;gap:10px;padding:17px 0;border-bottom:1px solid #edf0e7;font-size:14px}.criterion strong{white-space:nowrap;color:var(--green)}footer{font-size:12px;margin:28px 0;color:#75806f}
+    #backdrop{position:fixed;inset:0;background:#15211688;z-index:5;backdrop-filter:blur(3px)}.mfp-hide{display:none!important}.vote-popup{position:fixed;inset:5vh 12px auto;margin:auto;max-width:720px;max-height:90vh;background:white;border-radius:22px;z-index:6;box-shadow:0 25px 90px #12271844;display:flex;flex-direction:column}.popup-header{padding:22px 28px;border-bottom:1px solid #e9eee4;display:flex;align-items:center;justify-content:space-between}.popup-header h2{font-family:Georgia,serif;font-size:26px;font-weight:400;margin:0}.close-popup{border:0;background:#f0f3ed;color:#556b52;border-radius:50%;width:32px;height:32px;font-size:24px;line-height:1}.popup-content{overflow:auto;padding:0 28px}.rating-wrapper{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:20px 0;border-bottom:1px solid #edf0e7}.rating-label{font-size:15px}.rating-label small{display:block;color:#87917e;font-size:11px;margin-bottom:5px;letter-spacing:.06em}.stars{display:flex;gap:5px}.stars a{text-decoration:none;color:#cbd3c4;font-size:29px;line-height:1;padding:3px}.stars a.active{color:#e9ad25}.stars a:focus-visible{outline:2px solid var(--green);outline-offset:2px}.rating select{display:none}.captcha-box{margin:18px 0;padding:15px;border:1px dashed #bbcbb4;border-radius:10px;background:#f5f8f1;min-height:70px;font-size:13px;color:#45623c}.captcha-box small{display:block;margin-top:6px;color:#6a7961}.popup-footer{padding:16px 28px 20px;border-top:1px solid #e9eee4;background:white;border-radius:0 0 22px 22px}.popup-footer .primary{width:100%}.remaining{font-size:12px;text-align:center;margin:12px 0 0}#result{font-size:14px;padding-top:12px;min-height:12px;color:var(--green)}#result:empty{padding:0;min-height:0}.status{color:#536d49;font-size:13px}
+    @media(max-width:700px){.shell{padding:20px}.hero{grid-template-columns:1fr;gap:24px;margin:32px 0}.stat{padding:20px}.stat strong{font-size:32px}.criteria-grid{grid-template-columns:1fr;gap:0}.toolbar label{align-items:flex-start;flex-direction:column}.rating-wrapper{grid-template-columns:1fr;gap:10px}.popup-content{padding:0 20px}.popup-header,.popup-footer{padding-left:20px;padding-right:20px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <nav class="nav"><span class="brand">VOTE LAB / 2026</span><span class="badge">LOCALHOST · BẢN KIỂM THỬ</span></nav>
+    <section class="hero">
+      <div><span class="eyebrow">Một ngôi trường · Tám tiêu chí</span><h1>Trường học<br>hạnh phúc.</h1><p>Bình chọn thử cho Trường Tiểu học Thịnh Liệt.<br>Mọi lượt trên trang này chỉ là dữ liệu thử cục bộ.</p><button class="primary btn-vote" data-thhp_id="1098">Mở bình chọn <span aria-hidden="true">↗</span></button></div>
+      <div class="stats"><div class="stat"><strong id="accepted">0</strong><span>Lượt được ghi nhận</span></div><div class="stat"><strong id="total-stars">0</strong><span>Tổng điểm 8 tiêu chí</span></div></div>
+    </section>
+    <section class="panel">
+      <div class="toolbar"><label>Kịch bản thử<select id="scenario" aria-label="Kịch bản thử"><option value="open">Cho phép nhiều lượt để thử tải</option><option value="quota">Giới hạn 1 lượt / phiên / 24 giờ</option><option value="phone">Yêu cầu điện thoại · mã 2</option><option value="captcha">Từ chối CAPTCHA · mã 3</option><option value="server-error">Lỗi máy chủ · HTTP 500</option></select></label><button class="secondary" id="reset">Đặt lại bộ đếm</button></div>
+      <p class="note"><span id="captcha-mode">Đang tải cấu hình…</span> Đổi kịch bản sẽ đặt lại dữ liệu thử.</p>
+      <div class="criteria-grid" id="criterion-totals"></div>
+    </section>
+    <footer>API thử: POST /truong-hoc-hanh-phuc/vote · Dữ liệu lưu trong bộ nhớ của máy bạn.</footer>
+  </main>
+  <div id="backdrop" class="mfp-hide"></div>
+  <section id="vote-popup" class="vote-popup mfp-hide" role="dialog" aria-modal="true" aria-labelledby="popup-title">
+    <header class="popup-header"><h2 id="popup-title">Thông tin bình chọn</h2><button class="close-popup" aria-label="Đóng biểu mẫu">×</button></header>
+    <div class="popup-content"><div id="ratings"></div><div class="captcha-box"><div id="captcha1"></div><small id="captcha-status"></small><input type="hidden" name="cf-turnstile-response" value=""></div></div>
+    <div class="popup-footer"><button class="primary" id="btn-confirm-vote" data-thhp_id="1098">Bình chọn ngay</button><p class="remaining">Còn <strong id="err-max-vote">10000</strong> lượt trong kịch bản hiện tại</p><div id="result" role="status" aria-live="polite"></div></div>
+  </section>
+  <script type="module">
+    const labels = ['An toàn và thân thiện cho trẻ em','Không gian học tập và vui chơi xanh','Có giáo viên thân thiện','Có phương pháp dạy học hấp dẫn','Có nhiều hoạt động ngoại khóa','Quan tâm sức khỏe và dinh dưỡng','Học sinh được sáng tạo','Khối lượng học tập hợp lý'];
+    const $ = selector => document.querySelector(selector);
+    const format = value => new Intl.NumberFormat('vi-VN').format(value);
+    const tokenInput = $('[name="cf-turnstile-response"]');
+    const result = $('#result');
+    let state;
+    let widget;
+    let turnstileReady;
+    let opening = false;
+    $('#ratings').innerHTML = labels.map((label, i) => `<div class="rating-wrapper"><div class="rating-label"><small>TIÊU CHÍ ${String(i+1).padStart(2,'0')}</small>${label}</div><div><select class="rating" name="rating_type_${i+1}" hidden>${[1,2,3,4,5].map(n => `<option value="${n}">${n}</option>`).join('')}</select><div class="stars">${[1,2,3,4,5].map(n => `<a href="#" data-rating-value="${n}" aria-label="${n} sao: ${label}">★</a>`).join('')}</div></div></div>`).join('');
+    $('#criterion-totals').innerHTML = labels.map((label, i) => `<div class="criterion"><span>${label}</span><strong id="score-${i}">0 điểm</strong></div>`).join('');
+    document.querySelectorAll('.stars a').forEach(star => star.addEventListener('click', event => {
+      event.preventDefault();
+      const row = star.closest('.rating-wrapper');
+      row.querySelector('select').value = star.dataset.ratingValue;
+      row.querySelectorAll('a').forEach(a => a.classList.toggle('active', Number(a.dataset.ratingValue) <= Number(star.dataset.ratingValue)));
+    }));
+    async function refresh() {
+      const response = await fetch('/api/state');
+      if (!response.ok) throw new Error('Không đọc được trạng thái máy chủ');
+      state = await response.json();
+      $('#accepted').textContent = format(state.accepted);
+      $('#total-stars').textContent = format(state.totalStars);
+      $('#scenario').value = state.scenario;
+      $('#err-max-vote').textContent = state.remaining;
+      state.criteriaTotals.forEach((score, i) => { $(`#score-${i}`).textContent = `${format(score)} điểm`; });
+      $('#captcha-mode').textContent = state.captchaMode === 'mock' ? 'CAPTCHA mô phỏng cục bộ.' : 'Turnstile dùng khóa test chính thức của Cloudflare.';
+    }
+    function close() { $('#vote-popup').classList.add('mfp-hide'); $('#backdrop').classList.add('mfp-hide'); }
+    async function prepareCaptcha() {
+      tokenInput.value = '';
+      $('#captcha-status').textContent = 'Đang xác minh thử…';
+      if (state.captchaMode === 'mock') {
+        const response = await fetch('/api/test-token', { method: 'POST' });
+        if (!response.ok) throw new Error('Không tạo được token cục bộ');
+        tokenInput.value = (await response.json()).token;
+        $('#captcha1').textContent = '✓ Đã xác minh thử';
+        $('#captcha-status').textContent = 'Token cục bộ dùng một lần, chỉ có giá trị trên Vote Lab.';
+      } else {
+        if (!turnstileReady) turnstileReady = new Promise((resolve, reject) => {
+          window.onLabTurnstileReady = resolve;
+          const script = document.createElement('script');
+          script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onLabTurnstileReady&render=explicit';
+          script.onerror = () => reject(new Error('Không tải được widget Turnstile test'));
+          document.head.append(script);
+        });
+        await turnstileReady;
+        if (widget !== undefined) window.turnstile.reset(widget);
+        else widget = window.turnstile.render('#captcha1', { sitekey: '1x00000000000000000000AA', 'response-field': false,
+          callback: token => { tokenInput.value = token; $('#captcha-status').textContent = 'Khóa test đã xác minh thành công.'; },
+          'expired-callback': () => { tokenInput.value = ''; $('#captcha-status').textContent = 'Token thử đã hết hạn. Mở lại biểu mẫu.'; },
+          'error-callback': () => { tokenInput.value = ''; $('#captcha-status').textContent = 'Widget test gặp lỗi kết nối.'; },
+        });
+      }
+    }
+    $('.btn-vote').addEventListener('click', async () => {
+      if (opening) return;
+      opening = true;
+      try {
+        await refresh(); result.textContent = ''; delete result.dataset.code;
+        $('#vote-popup').classList.remove('mfp-hide'); $('#backdrop').classList.remove('mfp-hide');
+        await prepareCaptcha();
+      } catch (error) { result.textContent = error.message; }
+      finally { opening = false; }
+    });
+    $('.close-popup').onclick = close;
+    $('#backdrop').onclick = close;
+    $('#btn-confirm-vote').onclick = async () => {
+      if (!tokenInput.value) { result.textContent = 'Chưa có token xác minh thử.'; return; }
+      const button = $('#btn-confirm-vote');
+      button.disabled = true; result.textContent = 'Đang gửi…'; delete result.dataset.code;
+      const data = new URLSearchParams({ thhp_id: '1098', captcha: tokenInput.value });
+      document.querySelectorAll('select.rating').forEach(select => data.append('rating[]', select.value));
+      tokenInput.value = '';
+      try {
+        const response = await fetch('/truong-hoc-hanh-phuc/vote', { method: 'POST', body: data, signal: AbortSignal.timeout(10000) });
+        const code = (await response.text()).trim();
+        result.dataset.code = code;
+        result.textContent = response.ok ? ({'1':'✓ Bình chọn thử thành công.','0':'Đã hết lượt trong phiên này.','2':'Kịch bản yêu cầu cập nhật điện thoại.','3':'CAPTCHA thử bị từ chối.'}[code] ?? 'Phản hồi không nhận dạng') : `Lỗi HTTP ${response.status}`;
+        await refresh();
+      } catch { result.textContent = 'Không nhận được phản hồi. Dừng gửi.'; }
+      finally { button.disabled = false; }
+    };
+    $('#scenario').onchange = async event => {
+      close(); await fetch('/api/scenario', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ scenario: event.target.value }) }); await refresh();
+    };
+    $('#reset').onclick = async () => { close(); await fetch('/api/reset', { method: 'POST' }); await refresh(); };
+    await refresh();
+    setInterval(() => refresh().catch(() => {}), 2000);
+  </script>
+</body>
+</html>

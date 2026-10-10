@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="vi">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chọn 5 sao · Trường Tiểu học Thịnh Liệt</title>
+<style>
+  :root { font-family: system-ui, -apple-system, sans-serif; color: #19362d; background: #f5f6f0; }
+  body { max-width: 680px; margin: 0 auto; padding: 64px 24px; line-height: 1.65; }
+  .eyebrow { font-size: 13px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: #507568; }
+  h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.15; letter-spacing: -.035em; margin: 12px 0 20px; }
+  .bookmark { display: inline-block; background: #205c47; color: white; padding: 16px 24px; border-radius: 12px; font-weight: 650; text-decoration: none; cursor: grab; }
+  .install { background: white; border: 1px solid #dce3d7; border-radius: 18px; padding: 24px; margin: 28px 0; }
+  li { padding: 6px 0; }
+  a { color: #205c47; }
+  .hint, #install-hint { color: #536b62; font-size: 14px; }
+  textarea { box-sizing: border-box; width: 100%; height: 140px; font: 12px ui-monospace, monospace; padding: 12px; border: 1px solid #cad6cd; border-radius: 8px; }
+  :focus-visible { outline: 3px solid #b57b18; outline-offset: 4px; }
+</style>
+<p class="eyebrow">Trường Tiểu học Thịnh Liệt</p>
+<h1>Chọn 5 sao trong Chrome của bạn.</h1>
+<p>Công cụ nhỏ này chọn 5 sao cho tám tiêu chí trên trang bình chọn. Bạn tự xác minh CAPTCHA và bấm “Bình chọn ngay”.</p>
+<div class="install">
+  <strong>Cài một lần</strong>
+  <p>Mở tệp này bằng Chrome bình thường. Nhấn <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd> để hiện thanh dấu trang, rồi kéo nút dưới đây lên thanh đó.</p>
+  <a class="bookmark" id="prepare-bookmark" href="#">★ Thịnh Liệt · chọn 5 sao</a>
+  <p id="install-hint" role="status">Kéo nút lên thanh dấu trang để lưu.</p>
+</div>
+<ol>
+  <li><a href="https://treemvietnam.net.vn/truong-hoc-hanh-phuc/truong-tieu-hoc-thinh-liet-1098.html" target="_blank" rel="noopener noreferrer">Mở trang bình chọn của trường</a> trong Chrome bình thường.</li>
+  <li>Bấm dấu trang <strong>★ Thịnh Liệt · chọn 5 sao</strong> vừa lưu.</li>
+  <li>Kiểm tra các ngôi sao, tự xác minh CAPTCHA, rồi bấm <strong>Bình chọn ngay</strong> nếu còn lượt.</li>
+</ol>
+<p class="hint">Dùng trong Chrome bạn tự mở, không dùng cửa sổ do lệnh <code>npm run vote</code> mở. Công cụ chỉ hỗ trợ điền biểu mẫu; không đọc mã CAPTCHA, không tự gửi và không xác nhận phiếu đã được ghi nhận. Tuân thủ giới hạn một lượt cho mỗi trường trong 24 giờ.</p>
+<details>
+  <summary>Nếu không kéo được nút</summary>
+  <p>Tạo một dấu trang mới trong Chrome, đặt tên “Thịnh Liệt · chọn 5 sao”, rồi thay toàn bộ ô URL bằng mã bên dưới.</p>
+  <textarea id="bookmark-code" aria-label="Mã URL của dấu trang" readonly spellcheck="false"></textarea>
+</details>
+<script>
+  async function prepareVote() {
+    try {
+      if (location.protocol !== 'https:' || location.hostname !== 'treemvietnam.net.vn'
+        || location.pathname !== '/truong-hoc-hanh-phuc/truong-tieu-hoc-thinh-liet-1098.html') {
+        alert('Hãy mở đúng trang Trường Tiểu học Thịnh Liệt rồi bấm dấu trang này.');
+        return;
+      }
+      const visiblePopup = () => {
+        const element = document.querySelector('#vote-popup');
+        return element && element.getClientRects().length > 0
+          && getComputedStyle(element).visibility !== 'hidden' ? element : null;
+      };
+      let popup = visiblePopup();
+      if (!popup) {
+        const openButton = document.querySelector('.btn-vote[data-thhp_id="1098"]');
+        if (!openButton) throw new Error('Không tìm thấy nút mở biểu mẫu. Trang có thể đã thay đổi.');
+        openButton.click();
+        const deadline = Date.now() + 10_000;
+        while (!popup && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          popup = visiblePopup();
+        }
+      }
+      if (!popup) throw new Error('Biểu mẫu chưa mở sau 10 giây. Hãy tự mở mục bình chọn rồi bấm dấu trang lại.');
+      const confirm = popup.querySelector('#btn-confirm-vote');
+      const rows = [...popup.querySelectorAll('.rating-wrapper')];
+      const ratings = [...popup.querySelectorAll('select.rating')];
+      if (confirm?.getAttribute('data-thhp_id') !== '1098' || rows.length !== 8 || ratings.length !== 8) {
+        throw new Error('Biểu mẫu không khớp trường Thịnh Liệt và tám tiêu chí. Hãy kiểm tra trực tiếp trên trang.');
+      }
+      const remaining = popup.querySelector('#err-max-vote')?.textContent.trim() ?? '';
+      if (!/^\d+$/.test(remaining)) throw new Error('Không đọc được số lượt còn lại. Hãy kiểm tra trực tiếp trên trang.');
+      if (Number(remaining) === 0) throw new Error('Trang báo đã hết lượt. Hãy chờ lượt tiếp theo.');
+      const stars = rows.map(row => [...row.querySelectorAll('a[data-rating-value="5"]')]);
+      if (stars.some(matches => matches.length !== 1)) throw new Error('Không tìm thấy đủ tám nút 5 sao. Trang có thể đã thay đổi.');
+      for (const [star] of stars) star.click();
+      if (ratings.some(select => select.value !== '5')) throw new Error('Chưa chọn được đủ 5 sao. Hãy kiểm tra các tiêu chí trên trang.');
+      alert('Đã chọn 5 sao cho tám tiêu chí. Bạn tự xác minh CAPTCHA, rồi bấm “Bình chọn ngay” nếu còn lượt. Công cụ chưa gửi phiếu.');
+    } catch (error) {
+      alert(error.message);
+    }
+  }
+  const bookmarklet = 'javascript:' + encodeURIComponent('(' + prepareVote.toString() + ')()');
+  const bookmark = document.querySelector('#prepare-bookmark');
+  bookmark.href = bookmarklet;
+  bookmark.addEventListener('click', event => {
+    event.preventDefault();
+    document.querySelector('#install-hint').textContent = 'Hãy kéo nút này lên thanh dấu trang. Sau đó mở trang của trường và bấm dấu trang đã lưu.';
+  });
+  document.querySelector('#bookmark-code').value = bookmarklet;
+</script>
+</html>
