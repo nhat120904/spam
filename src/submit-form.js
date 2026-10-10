@@ -82,6 +82,8 @@
           return originalAlert.call(window, message);
         }
         current.dataset.error = detail;
+        current.dataset.errorCode = String(message) === 'Vui lòng xác minh mã Captcha!'
+          ? 'captcha-rejected' : 'site-error';
         current.textContent = String(message);
         current.hidden = false;
         current.setAttribute('role', 'alert');

@@ -24,6 +24,14 @@ Bạn chỉ cần xử lý CAPTCHA; đợi script bấm nút gửi để tránh 
 
 ## Tùy chọn
 
+Chạy Chrome ẩn cửa sổ (headless), vẫn dùng phiên ẩn danh:
+
+```powershell
+py open_incognito_windows.py --headless
+```
+
+Chế độ này dùng `--headless=new`, hồ sơ riêng `ChromeProfileHeadless`, và đóng Chrome do script tạo khi kết thúc. CAPTCHA phải được trang xác minh mà không cần thao tác tay; nếu hết thời gian chờ thì chưa gửi. Nếu CAPTCHA yêu cầu bấm tay, chạy lại không có `--headless`. Không tự giải hoặc bỏ qua CAPTCHA. Không kết hợp với `--open-only` hay `--select-only` vì hai chế độ đó cần cửa sổ để thao tác. Xem cấu hình trước bằng `py open_incognito_windows.py --headless --dry-run`. Các tham số thời gian chờ vẫn dùng được.
+
 ```powershell
 # Chỉ chọn sao; bạn tự xác minh CAPTCHA và tự bấm gửi
 py open_incognito_windows.py --select-only
@@ -47,12 +55,14 @@ Các tùy chọn cũng dùng được với `run_windows.bat`, ví dụ `run_win
 
 Bản Windows điều khiển Chrome qua DevTools tại `127.0.0.1`. Chrome dùng hồ sơ riêng cố định ở `%LOCALAPPDATA%\ThinhLietHelper\ChromeProfile`; đây là yêu cầu của [Chrome với remote debugging từ phiên bản 136](https://developer.chrome.com/blog/remote-debugging-port). Không cần bật quyền Apple Events của macOS. Script không dùng Selenium, Playwright hoặc ChromeDriver khi chạy.
 
+Script cấp cổng debug cụ thể, thay cho `--remote-debugging-port=0` của bản cũ. Cổng `0` tự bật `navigator.webdriver` trong Chrome, khác cách mở bằng Apple Events trên macOS; xem [mã nguồn Chromium](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/content/child/runtime_features.cc).
+
 Nếu bản trước còn đang chạy, script sẽ báo và dừng. Hai chế độ `--open-only` và `--select-only` vẫn giữ tab mở khi hoàn tất bình thường để bạn thao tác tay. Nếu `--select-only` gặp lỗi thì cũng đóng tab. Đóng cửa sổ còn mở của công cụ trước khi chạy lại. Chrome cá nhân và các tab khác được giữ nguyên. Nếu Chrome mất kết nối khiến lệnh đóng tab thất bại, terminal sẽ báo rõ.
 
-CAPTCHA thật trên Windows chưa được kiểm chứng. Cách điều khiển này khác bản macOS; việc Chrome mở được và chọn sao thành công không đảm bảo Cloudflare chấp nhận phiên. Nếu widget hiện **Verification failed**, không tiếp tục bấm gửi; dùng `--open-only` để thao tác trực tiếp. Script không tự giải CAPTCHA hoặc thay đổi cơ chế xác minh của trang.
+Sau khi sửa cách cấp cổng, người dùng đã tự xác minh CAPTCHA thật thành công ở hai worker của bản Windows song song dùng chung cơ chế này. Nếu widget hiện **Verification failed**, không tiếp tục bấm gửi; dùng `--open-only` để thao tác trực tiếp. Script không tự giải CAPTCHA hoặc thay đổi cơ chế xác minh của trang.
 
 ## Phạm vi đã kiểm thử
 
-Đã kiểm thử kết nối DevTools thật trong Chrome trên macOS với biểu mẫu mô phỏng: chọn đủ tám mục, chờ CAPTCHA, gửi đúng một lần, đóng đúng tab sau thành công, khi CAPTCHA hết giờ, khi có lỗi hoặc chưa rõ kết quả; giữ các tab khác. Kiểm thử không gửi phiếu tới website thật. Chưa chạy trực tiếp trên Windows hoặc xác nhận CAPTCHA thật trên Windows.
+Đã kiểm thử kết nối DevTools thật trong Chrome trực tiếp trên Windows với biểu mẫu mô phỏng: chọn đủ tám mục, chờ CAPTCHA, gửi đúng một lần, đóng đúng tab sau thành công, khi CAPTCHA hết giờ, khi có lỗi hoặc chưa rõ kết quả; giữ các tab khác. 41 kiểm thử của hai bản Windows đã đạt. Kiểm thử không gửi phiếu tới website thật.
 
 Mã thoát: `0` hoàn tất, `1` lỗi hoặc hết thời gian chờ, `2` tham số không hợp lệ, `130` người dùng dừng bằng Ctrl+C. Ctrl+C cũng đóng tab bình chọn do script quản lý trước khi thoát.

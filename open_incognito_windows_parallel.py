@@ -3,6 +3,7 @@
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,8 @@ from uuid import uuid4
 
 from open_incognito_windows import (
     URL, SOURCE_DIR, ChromeTab, CdpConnection, endpoint_is_alive,
-    find_chrome, positive_seconds, read_endpoint, websocket_module,
+    choose_debugging_port, find_chrome, positive_seconds, read_port_endpoint,
+    save_endpoint, websocket_module,
 )
 
 
@@ -24,6 +26,28 @@ PRINT_LOCK = threading.Lock()
 
 class Cancelled(RuntimeError):
     pass
+
+
+class CaptchaVerificationError(RuntimeError):
+    pass
+
+
+class CaptchaRejectedError(RuntimeError):
+    pass
+
+
+def captcha_error_message(code):
+    if code.startswith(("300", "600")):
+        detail = "Cloudflare từ chối challenge (có thể phát hiện hành vi tự động)."
+    elif code in ("110600", "200100"):
+        detail = "Challenge hết giờ hoặc đồng hồ/cache có vấn đề. Kiểm tra ngày giờ Windows."
+    elif code == "200500":
+        detail = "Không tải được CAPTCHA. Kiểm tra kết nối tới challenges.cloudflare.com."
+    elif code in ("110100", "110110", "110200", "400020", "400021", "400070"):
+        detail = "Cấu hình CAPTCHA của website có vấn đề; cần quản trị website kiểm tra."
+    else:
+        detail = "CAPTCHA của Cloudflare báo lỗi."
+    return f"CAPTCHA lỗi {code}: {detail} Chưa bấm gửi."
 
 
 class ProfileLease:
@@ -68,6 +92,7 @@ class ChromeSession:
         self.connection = None
         self.tab = None
         self.lease = None
+        self.command_timeout = 20
         # Dấu nhận diện khác nhau cho từng lần mở; không chọn active tab.
         self.start_page = f"data:text/plain,ThinhLiet-{self.profile.name}-{uuid4().hex}"
 
@@ -90,9 +115,10 @@ class ChromeSession:
                                    "Đóng cửa sổ đó trước khi chạy lại.")
             (self.profile / "DevToolsActivePort").unlink(missing_ok=True)
             self.check_cancelled()
+            port = choose_debugging_port()
             self.process = subprocess.Popen(
                 [str(self.chrome), f"--user-data-dir={self.profile}",
-                 "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
+                 f"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1",
                  "--no-first-run", "--no-default-browser-check", "--disable-background-mode",
                  "--incognito", "--new-window", self.start_page],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -103,24 +129,36 @@ class ChromeSession:
                 if self.process.poll() is not None:
                     raise RuntimeError("Chrome không khởi động được; hồ sơ có thể đang được mở "
                                        "bên ngoài script. Hãy đóng Chrome dùng hồ sơ này.")
-                if self.connection is None:
-                    try:
-                        http, ws = read_endpoint(self.profile)
-                        self.connection = CdpConnection(ws)
-                    except (OSError, ValueError, IndexError, RuntimeError):
-                        self.stop.wait(0.1)
-                        continue
-                targets = self.connection.call("Target.getTargets")["targetInfos"]
-                pages = [target for target in targets
-                         if target["type"] == "page" and target["url"] == self.start_page]
+                connection = None
+                try:
+                    http, ws = read_port_endpoint(port)
+                    connection = CdpConnection(ws)
+                    connection.command_timeout = self.command_timeout
+                    targets = connection.call("Target.getTargets")["targetInfos"]
+                    pages = [target for target in targets
+                             if target["type"] == "page" and target["url"] == self.start_page]
+                    if pages:
+                        # Chỉ nhận quyền điều khiển sau khi khớp dấu nhận diện
+                        # của lần mở này, phòng trường hợp cổng vừa bị chiếm.
+                        self.connection = connection
+                        connection = None
+                except (OSError, ValueError, IndexError, RuntimeError):
+                    self.stop.wait(0.1)
+                    continue
+                finally:
+                    if connection is not None:
+                        connection.close()
                 if len(pages) > 1:
                     raise RuntimeError("Không xác định được duy nhất tab của worker.")
                 if pages:
                     target_id = pages[0]["targetId"]
+                    save_endpoint(self.profile, ws)
                     session_id = self.connection.call("Target.attachToTarget", {
                         "targetId": target_id, "flatten": True,
                     })["sessionId"]
                     self.tab = ChromeTab(self.connection, target_id, session_id, http, self.process)
+                    # Nhận cả lỗi Turnstile trong lúc chờ; không sửa challenge.
+                    self.connection.call("Runtime.enable", session_id=session_id)
                     return
                 self.stop.wait(0.1)
             raise RuntimeError("Hết thời gian chờ Chrome khởi động.")
@@ -171,13 +209,15 @@ class ChromeSession:
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                         )
-                        if result.returncode and self.process.poll() is None:
-                            raise RuntimeError(f"Không dừng được cây tiến trình Chrome PID {self.pid}.")
+                        # taskkill có thể trả lỗi vì một tiến trình con vừa tự
+                        # thoát. Chờ tiến trình cha kết thúc trước khi báo lỗi.
                     else:
                         self.process.terminate()
                     try:
                         self.process.wait(timeout=3)
                     except subprocess.TimeoutExpired:
+                        if os.name == "nt" and result.returncode:
+                            raise RuntimeError(f"Không dừng được cây tiến trình Chrome PID {self.pid}.")
                         self.process.kill()
                         self.process.wait(timeout=3)
         finally:
@@ -201,6 +241,7 @@ def wait_state(session, source_name, desired, timeout, stop, log):
     deadline = time.monotonic() + timeout
     message = "Trang chưa sẵn sàng."
     last_report, last_report_at = None, 0
+    captcha_code = None
     while time.monotonic() < deadline:
         if stop.is_set():
             raise Cancelled("Đã dừng worker.")
@@ -212,31 +253,64 @@ def wait_state(session, source_name, desired, timeout, stop, log):
             return report
         message = report.get("message", message)
         if report["state"] == "error":
+            if report.get("code") == "captcha-rejected":
+                raise CaptchaRejectedError(message)
             raise RuntimeError(message)
+        if source_name == "submit-form.js":
+            code = session.connection.turnstile_error(session.tab.session_id)
+            if code and code != captcha_code:
+                captcha_code = code
+                log(captcha_error_message(code))
+                log("Bạn có thể thử lại CAPTCHA trong cửa sổ này; script tiếp tục chờ xác minh hợp lệ.")
         now = time.monotonic()
         if message != last_report or now - last_report_at >= 5:
             log(message)
             last_report, last_report_at = message, now
         stop.wait(min(0.25, max(0, deadline - time.monotonic())))
+    if captcha_code:
+        raise CaptchaVerificationError(captcha_error_message(captcha_code))
     raise RuntimeError(f"Hết thời gian chờ: {message}. Không tự gửi lại.")
 
 
-def run_worker(worker_id, args, stop, register_session=None):
+@contextmanager
+def startup_slot(slots, stop):
+    if slots is None:
+        yield
+        return
+    while not stop.is_set():
+        if slots.acquire(timeout=0.1):
+            break
+    else:
+        raise Cancelled("Đã dừng worker.")
+    try:
+        if stop.is_set():
+            raise Cancelled("Đã dừng worker.")
+        yield
+    finally:
+        slots.release()
+
+
+def run_worker(worker_id, args, stop, register_session=None, startup_slots=None):
     log = lambda message: log_worker(worker_id, message)
     session = ChromeSession(args.profiles_dir / f"worker-{worker_id}", args.chrome, stop)
+    session.command_timeout = args.cdp_timeout
     if register_session is not None:
         register_session(worker_id, session)
     keep_open, status = False, 1
     try:
-        session.start()
-        log(f"Chrome riêng đã mở (PID {session.pid}).")
-        session.navigate(args.timeout)
-        log("Đã mở trang trong phiên ẩn danh riêng.")
+        # Chỉ giới hạn lúc khởi động/tải trang; mọi worker vẫn chờ CAPTCHA và
+        # kết quả song song sau khi sẵn sàng. Tránh dồn 8 Chrome mới vào một lúc.
+        with startup_slot(startup_slots, stop):
+            session.start()
+            log(f"Chrome riêng đã mở (PID {session.pid}).")
+            session.navigate(args.timeout)
+            log("Đã mở trang trong phiên ẩn danh riêng.")
+            if not args.open_only:
+                wait_state(session, "prepare-form.js", "ready", args.timeout, stop, log)
+                log("Đã chọn đủ tám mục 5 sao.")
         if args.open_only:
             keep_open = True
         else:
-            wait_state(session, "prepare-form.js", "ready", args.timeout, stop, log)
-            log("Đã chọn đủ tám mục 5 sao.")
             if args.select_only:
                 keep_open = True
                 log("Bạn tự xác minh CAPTCHA và bấm gửi trong cửa sổ này.")
@@ -250,6 +324,8 @@ def run_worker(worker_id, args, stop, register_session=None):
     except Cancelled as error:
         log(str(error))
         status = 130
+    except (CaptchaVerificationError, CaptchaRejectedError) as error:
+        log(str(error))
     except (RuntimeError, OSError, ValueError, TypeError, KeyError, subprocess.TimeoutExpired) as error:
         log(f"Chưa hoàn tất: {error}")
     finally:
@@ -259,6 +335,8 @@ def run_worker(worker_id, args, stop, register_session=None):
             retained = keep_open and not stop.is_set() and register_session is not None
             if not retained:
                 session.close(keep_open=keep_open and not stop.is_set())
+                if status != 0:
+                    log("Đã dọn phiên Chrome của worker.")
         except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
             log(f"Không đóng được Chrome của worker: {error}")
             status = 1
@@ -275,10 +353,11 @@ def run_parallel(args):
         with session_lock:
             sessions.append((worker_id, session))
     executor = ThreadPoolExecutor(max_workers=args.workers, thread_name_prefix="chrome-worker")
+    startup_slots = threading.BoundedSemaphore(min(args.workers, 2))
     futures = {}
     interrupted = False
     try:
-        futures = {executor.submit(run_worker, number, args, stop, register_session): number
+        futures = {executor.submit(run_worker, number, args, stop, register_session, startup_slots): number
                    for number in range(1, args.workers + 1)}
         for future in as_completed(futures):
             try:
@@ -302,7 +381,7 @@ def run_parallel(args):
         while index < len(sessions):
             worker_id, session = sessions[index]
             try:
-                session.close(keep_open=not interrupted)
+                session.close(keep_open=not interrupted and (args.open_only or args.select_only))
             except KeyboardInterrupt:
                 interrupted = True
                 stop.set()
@@ -332,6 +411,7 @@ def parse_args(argv=None):
     mode.add_argument("--select-only", action="store_true", help="Chọn sao, giữ Chrome mở để tự gửi.")
     for name, default, description in (
         ("timeout", 45, "chờ trang và biểu mẫu"),
+        ("cdp-timeout", 20, "chờ mỗi lệnh điều khiển Chrome"),
         ("captcha-timeout", 180, "chờ bạn xác minh CAPTCHA"),
         ("response-timeout", 45, "chờ kết quả gửi"),
     ):

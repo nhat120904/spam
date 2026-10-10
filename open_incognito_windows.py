@@ -7,11 +7,14 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
 from urllib.request import ProxyHandler, build_opener
+from urllib.parse import urlsplit
 
 
 URL = ("https://treemvietnam.net.vn/truong-hoc-hanh-phuc/"
@@ -48,12 +51,21 @@ def websocket_module():
     return websocket
 
 
+class CdpTimeout(RuntimeError):
+    pass
+
+
+class CdpDisconnected(RuntimeError):
+    pass
+
+
 class CdpConnection:
     """Chỉ kết nối DevTools của Chrome riêng tại loopback, không đọc hồ sơ cá nhân."""
 
     def __init__(self, url):
         websocket = websocket_module()
         self.socket_error = websocket.WebSocketException
+        self.socket_timeout = websocket.WebSocketTimeoutException
         try:
             self.socket = websocket.create_connection(
                 url, timeout=5, suppress_origin=True,
@@ -62,33 +74,81 @@ class CdpConnection:
         except (OSError, self.socket_error) as error:
             raise RuntimeError("Không kết nối được Chrome qua DevTools cục bộ.") from error
         self.next_id = 0
+        self.command_timeout = 20
+        self.turnstile_errors = {}
+
+    def record_event(self, event):
+        # Chỉ lưu mã lỗi công khai, không ghi token/cookie hoặc nội dung console.
+        if event.get("method") != "Runtime.consoleAPICalled":
+            return
+        for argument in event.get("params", {}).get("args", []):
+            value = argument.get("value")
+            if not isinstance(value, str):
+                continue
+            match = re.search(r"\[Cloudflare Turnstile\]\s*Error:\s*(\d{6})\b", value)
+            if match:
+                self.turnstile_errors[event.get("sessionId")] = match.group(1)
+
+    def turnstile_error(self, session_id):
+        return self.turnstile_errors.get(session_id)
 
     def call(self, method, params=None, session_id=None):
         self.next_id += 1
         request = {"id": self.next_id, "method": method, "params": params or {}}
         if session_id:
             request["sessionId"] = session_id
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + self.command_timeout
         try:
+            self.socket.settimeout(self.command_timeout)
             self.socket.send(json.dumps(request, ensure_ascii=False))
             while time.monotonic() < deadline:
                 self.socket.settimeout(max(0.01, deadline - time.monotonic()))
                 raw = self.socket.recv()
                 if not raw:
-                    raise RuntimeError("Kết nối Chrome đã đóng.")
+                    raise CdpDisconnected(f"Chrome đã đóng kết nối khi thực hiện {method}; không tự gửi lại.")
                 reply = json.loads(raw)
                 if reply.get("id") != self.next_id:
+                    self.record_event(reply)
                     continue
                 if "error" in reply:
                     raise RuntimeError(f"Chrome không thực hiện được {method}: "
                                        f"{reply['error'].get('message', 'lỗi DevTools')}")
                 return reply.get("result", {})
+        except (TimeoutError, self.socket_timeout) as error:
+            raise CdpTimeout(f"Chrome phản hồi {method} quá {self.command_timeout:g} giây; "
+                             "không tự gửi lại.") from error
         except (OSError, self.socket_error) as error:
-            raise RuntimeError("Chrome ngắt kết nối hoặc không phản hồi; không tự gửi lại.") from error
-        raise RuntimeError("Chrome không phản hồi trong thời gian chờ; không tự gửi lại.")
+            raise CdpDisconnected(f"Chrome ngắt kết nối khi thực hiện {method}; "
+                                  "không tự gửi lại.") from error
+        raise CdpTimeout(f"Chrome phản hồi {method} quá {self.command_timeout:g} giây; "
+                         "không tự gửi lại.")
 
     def close(self):
         self.socket.close()
+
+
+def choose_debugging_port():
+    # Chọn cổng loopback cụ thể. Chrome coi --remote-debugging-port=0 là
+    # chế độ tự động (navigator.webdriver=true), khác Chrome mở qua Apple Events.
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
+
+
+def read_port_endpoint(port):
+    http = f"http://127.0.0.1:{port}"
+    with LOCAL_HTTP.open(http + "/json/version", timeout=1) as response:
+        ws = json.load(response).get("webSocketDebuggerUrl", "")
+    parsed = urlsplit(ws)
+    if (parsed.scheme != "ws" or parsed.hostname != "127.0.0.1"
+            or parsed.port != port or not parsed.path.startswith("/devtools/browser/")):
+        raise ValueError("Địa chỉ DevTools không hợp lệ.")
+    return http, ws
+
+
+def save_endpoint(profile, ws):
+    parsed = urlsplit(ws)
+    (profile / "DevToolsActivePort").write_text(f"{parsed.port}\n{parsed.path}\n", encoding="utf-8")
 
 
 def read_endpoint(profile):
@@ -111,7 +171,7 @@ def endpoint_is_alive(profile):
 
 class ChromeTab:
     @classmethod
-    def launch(cls, chrome, profile, timeout=30):
+    def launch(cls, chrome, profile, timeout=30, headless=False):
         websocket_module()  # Báo thiếu thư viện trước khi mở cửa sổ.
         profile = Path(profile)
         profile.mkdir(parents=True, exist_ok=True)
@@ -119,19 +179,31 @@ class ChromeTab:
             raise RuntimeError("Cửa sổ Chrome của công cụ vẫn mở. Đóng cửa sổ đó rồi chạy lại; "
                                "không cần đóng Chrome cá nhân.")
         (profile / "DevToolsActivePort").unlink(missing_ok=True)
+        port = choose_debugging_port()
         process = subprocess.Popen(
-            [str(chrome), f"--user-data-dir={profile}", "--remote-debugging-port=0",
+            [str(chrome), f"--user-data-dir={profile}", f"--remote-debugging-port={port}",
              "--remote-debugging-address=127.0.0.1", "--no-first-run",
-             "--no-default-browser-check", "--incognito", "--new-window", START_PAGE],
+             "--no-default-browser-check", "--incognito", "--new-window",
+             *(["--headless=new", "--window-size=1280,900"] if headless else []), START_PAGE],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+        try:
+            return cls.connect_started(process, profile, port, timeout)
+        except BaseException:
+            if headless and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=10)
+            raise
+
+    @classmethod
+    def connect_started(cls, process, profile, port, timeout):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if process.poll() is not None:
                 raise RuntimeError("Chrome không khởi động được. Nếu cửa sổ của công cụ còn mở, "
                                    "hãy đóng cửa sổ đó rồi chạy lại.")
             try:
-                http, ws = read_endpoint(profile)
+                http, ws = read_port_endpoint(port)
                 connection = CdpConnection(ws)
             except (OSError, ValueError, IndexError, RuntimeError):
                 time.sleep(0.1)
@@ -144,6 +216,7 @@ class ChromeTab:
                         raise RuntimeError("Có nhiều tab trống nên không xác định được tab của công cụ.")
                     if pages:
                         target_id = pages[0]["targetId"]
+                        save_endpoint(profile, ws)
                         session_id = connection.call("Target.attachToTarget", {
                             "targetId": target_id, "flatten": True,
                         })["sessionId"]
@@ -213,7 +286,7 @@ def wait_for_state(tab, source_name, desired, timeout, timeout_message, interval
 
 
 def run_workflow(tab, timeout=45, captcha_timeout=10, response_timeout=45,
-                 select_only=False, navigate=False):
+                 select_only=False, navigate=False, headless=False):
     keep_open = False
     try:
         if navigate:
@@ -226,7 +299,9 @@ def run_workflow(tab, timeout=45, captcha_timeout=10, response_timeout=45,
             print("Bạn tự xác minh CAPTCHA và bấm nút gửi. Tab vẫn mở.", flush=True)
             keep_open = True
             return
-        print("Bạn chỉ cần xác minh CAPTCHA; script sẽ tự bấm Bình chọn ngay một lần.", flush=True)
+        print("Headless: chờ CAPTCHA được trang xác minh; nếu cần bấm tay, chạy lại không có --headless."
+              if headless else "Bạn chỉ cần xác minh CAPTCHA; script sẽ tự bấm Bình chọn ngay một lần.",
+              flush=True)
         submitted = wait_for_state(tab, "submit-form.js", "clicked", captcha_timeout,
                                    "Hết thời gian chờ CAPTCHA, chưa bấm gửi:")
         print(submitted["message"], flush=True)
@@ -281,6 +356,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--chrome", help="Đường dẫn chrome.exe nếu Chrome cài ở vị trí khác.")
     parser.add_argument("--dry-run", action="store_true", help="Xem các bước, chưa mở Chrome.")
+    parser.add_argument("--headless", action="store_true", help="Chạy Chrome ẩn cửa sổ; không thể xác minh CAPTCHA bằng tay.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--open-only", action="store_true", help="Chỉ mở trang, bạn tự chọn sao và gửi.")
     mode.add_argument("--select-only", action="store_true", help="Tự chọn sao rồi dừng, bạn tự gửi.")
@@ -289,12 +365,17 @@ def main(argv=None):
                         help="Chờ CAPTCHA (giây, mặc định: 10).")
     parser.add_argument("--response-timeout", type=positive_seconds, default=45, help="Chờ kết quả (giây).")
     args = parser.parse_args(argv)
+    if args.headless and (args.open_only or args.select_only):
+        parser.error("--headless không dùng với --open-only hoặc --select-only vì các chế độ đó cần thao tác tay.")
     if args.dry_run:
         print(f"Mở Chrome ẩn danh trên Windows: {URL}")
+        if args.headless:
+            print("Headless (--headless=new): không hiện cửa sổ; đóng Chrome riêng khi kết thúc.")
+            print("Nếu CAPTCHA cần thao tác tay thì hết giờ và chưa gửi; chạy lại không có --headless.")
         if not args.open_only:
             print("Mở biểu mẫu và chọn 5 sao cho cả tám mục.")
             if not args.select_only:
-                print(f"Chờ bạn xác minh CAPTCHA tối đa {args.captcha_timeout:g} giây, bấm gửi một lần.")
+                print(f"Chờ {'trang xác minh CAPTCHA' if args.headless else 'bạn xác minh CAPTCHA'} tối đa {args.captcha_timeout:g} giây, bấm gửi một lần.")
                 print("Đóng đúng tab ẩn danh khi thành công, có lỗi hoặc hết thời gian chờ.")
         return 0
     if sys.platform != "win32":
@@ -314,18 +395,35 @@ def main(argv=None):
             if not (SOURCE_DIR / name).is_file():
                 raise RuntimeError(f"Thiếu src/{name}. Giải nén đầy đủ gói Windows rồi chạy lại.")
         with single_run(directory):
-            tab = ChromeTab.launch(chrome, directory / "ChromeProfile")
+            if args.headless:
+                tab = ChromeTab.launch(chrome, directory / "ChromeProfileHeadless", headless=True)
+            else:
+                tab = ChromeTab.launch(chrome, directory / "ChromeProfile")
             try:
                 run_workflow(tab, args.timeout, args.captcha_timeout, args.response_timeout,
-                             args.select_only, navigate=True)
+                             args.select_only, navigate=True, headless=args.headless)
             finally:
-                tab.disconnect()
-                tab = None
+                try:
+                    if args.headless:
+                        try:
+                            tab.connection.call("Browser.close")
+                        except CdpDisconnected:
+                            # Chrome có thể đóng socket ngay khi tab cuối cùng đã đóng.
+                            pass
+                        finally:
+                            try:
+                                tab.process.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                tab.process.terminate()
+                                tab.process.wait(timeout=10)
+                finally:
+                    tab.disconnect()
+                    tab = None
         return 0
     except KeyboardInterrupt:
         print("\nĐã dừng script; không tự gửi lại.", file=sys.stderr)
         return 130
-    except (RuntimeError, OSError, ValueError) as error:
+    except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"Lỗi: {error}", file=sys.stderr)
         return 1
     finally:

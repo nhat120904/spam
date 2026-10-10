@@ -41,13 +41,13 @@ class WindowsChromeTests(unittest.TestCase):
         native_popen = subprocess.Popen
 
         def launch_headless(command, **kwargs):
-            # Chỉ đổi cách hiển thị cho kiểm thử; giữ nguyên CDP và hồ sơ thật.
-            process = native_popen([*command, "--headless=new"], **kwargs)
+            self.assertIn("--headless=new", command)
+            process = native_popen(command, **kwargs)
             self.addCleanup(self.stop_owned_process, process)
             return process
 
         with patch.object(self.helper.subprocess, "Popen", side_effect=launch_headless):
-            self.tab = self.helper.ChromeTab.launch(chrome, self.profile, timeout=15)
+            self.tab = self.helper.ChromeTab.launch(chrome, self.profile, timeout=15, headless=True)
         self.addCleanup(self.stop_chrome)
         self.browser = self.playwright.chromium.connect_over_cdp(self.tab.http_endpoint)
         self.context = self.browser.contexts[0]
@@ -99,7 +99,8 @@ class WindowsChromeTests(unittest.TestCase):
             navigation.result()
         other = self.context.new_page()
         self.run_flow()
-        other.wait_for_timeout(10)
+        if not self.page.is_closed():
+            self.page.wait_for_event("close", timeout=2000)
         self.assertTrue(self.page.is_closed())
         self.assertFalse(other.is_closed())
         self.assertEqual([method for method, _ in self.requests], ["GET", "POST"])
@@ -149,6 +150,24 @@ class WindowsChromeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "vẫn mở"):
             self.helper.ChromeTab.launch("must-not-launch", self.profile, timeout=1)
 
+    def check_headless_main_cleanup(self, error=None):
+        # Giữ Chrome/CDP thật, thay workflow để không truy cập website bình chọn.
+        with patch.dict(os.environ, {"LOCALAPPDATA": self.directory.name}), \
+                patch.object(self.helper.ChromeTab, "launch", return_value=self.tab) as launch, \
+                patch.object(self.helper, "run_workflow", side_effect=error) as workflow, \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(self.helper.main(["--headless"]), 1 if error else 0)
+        self.assertTrue(launch.call_args.kwargs["headless"])
+        self.assertEqual(launch.call_args.args[1].name, "ChromeProfileHeadless")
+        self.assertTrue(workflow.call_args.kwargs["headless"])
+        self.assertIsNotNone(self.tab.process.poll())
+
+    def test_headless_main_closes_browser_after_success(self):
+        self.check_headless_main_cleanup()
+
+    def test_headless_main_closes_browser_after_failure(self):
+        self.check_headless_main_cleanup(RuntimeError("fixture CAPTCHA timeout"))
+
     def test_error_after_navigation_closes_same_tab_and_keeps_other_tabs(self):
         self.load_form()
         other = self.context.new_page()
@@ -170,6 +189,21 @@ class WindowsChromeTests(unittest.TestCase):
 
 
 class WindowsCommandTests(unittest.TestCase):
+    def test_headless_dry_run_explains_captcha_and_cleanup(self):
+        result = subprocess.run([sys.executable, str(SCRIPT), "--headless", "--dry-run"],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--headless=new", result.stdout)
+        self.assertIn("chưa gửi", result.stdout)
+        self.assertIn("đóng Chrome riêng", result.stdout)
+
+    def test_headless_rejects_manual_modes(self):
+        for mode in ("--open-only", "--select-only"):
+            with self.subTest(mode=mode):
+                result = subprocess.run([sys.executable, str(SCRIPT), "--headless", mode, "--dry-run"],
+                                        capture_output=True, text=True, timeout=5)
+                self.assertEqual(result.returncode, 2)
+
     def test_dry_run_runs_without_windows_or_opening_chrome(self):
         self.assertTrue(SCRIPT.is_file(), "Chưa có script chạy trên Windows.")
         result = subprocess.run([sys.executable, str(SCRIPT), "--dry-run"],

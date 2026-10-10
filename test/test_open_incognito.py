@@ -244,6 +244,7 @@ class PrepareVoteFormTests(unittest.TestCase):
         self.page.wait_for_function("window.voteResponseHandled === true")
         report = json.loads(self.page.evaluate(self.result_source_path.read_text()))
         self.assertEqual(report["state"], "error")
+        self.assertEqual(report["code"], "captcha-rejected")
         self.assertIn("CAPTCHA", report["message"])
         self.assertEqual(dialogs, [], "Thông báo CAPTCHA không được khóa Apple Events bằng alert.")
         self.assertEqual(self.submit()["state"], "clicked")
